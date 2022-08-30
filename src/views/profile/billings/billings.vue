@@ -1,10 +1,10 @@
 <template>
   <div class="billings-container" style="padding:20px">
     <el-button type="primary" round @click="viewAdd = true">添加账单</el-button>
-    <el-button round>导入账单</el-button>
-    <el-button round>导出账单</el-button>
+    <el-button round @click="viewImport = true">导入账单</el-button>
+    <el-button round @click="handleExport">导出账单</el-button>
     <el-button type="danger" round style="float:right;margin-right:70px" @click="removeRows">批量删除</el-button>
-    <el-button type="warning" round style="float:right" @click="viewBatchEdit = true">批量修改</el-button>
+    <el-button type="warning" round style="float:right" @click="showBatchEdit">批量修改</el-button>
     <!-- 添加账单窗口 -->
     <el-dialog :visible.sync="viewAdd" title="添加账单" width="35%">
       <el-form ref="addData" :model="addData" label-width="80px">
@@ -33,13 +33,17 @@
           <el-input v-model="addData.zip" />
         </el-form-item>
         <el-form-item label="州">
-          <el-select v-model="addData.state" placeholder="请选择州">
-            <el-option label="DE" value="DE" />
-            <el-option label="NJ" value="NJ" />
+          <el-select v-model="addData.state" filterable placeholder="请选择州">
+            <el-option
+              v-for="item in stateList"
+              :key="item"
+              :label="item"
+              :value="item"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="国家">
-          <el-select v-model="addData.country" placeholder="请选择国家">
+          <el-select v-model="addData.country" placeholder="请选择国家" @change="changeCountry($event)">
             <el-option label="US" value="US" />
             <el-option label="CA" value="CA" />
           </el-select>
@@ -79,15 +83,26 @@
         </el-form-item>
         <el-form-item label="州">
           <el-select v-model="editData.state" placeholder="请选择州">
-            <el-option label="DE" value="DE" />
-            <el-option label="NJ" value="NJ" />
+            <el-option
+              v-for="item in stateList"
+              :key="item"
+              :label="item"
+              :value="item"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="国家">
-          <el-select v-model="editData.country" placeholder="请选择国家">
+          <el-select v-model="editData.country" placeholder="请选择国家" @change="changeCountry($event)">
             <el-option label="US" value="US" />
             <el-option label="CA" value="CA" />
           </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-checkbox-group v-model="checkboxGroup">
+            <el-checkbox label="修饰电话号码" border />
+            <el-checkbox label="修饰邮箱" border />
+            <el-checkbox label="修饰地址" border />
+          </el-checkbox-group>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click.native.prevent="updateProfileSubmit">修改账单</el-button>
@@ -135,14 +150,18 @@
           </el-select>
         </el-form-item>
         <el-form-item>
+          <el-checkbox-group v-model="checkboxGroup">
+            <el-checkbox label="修饰电话号码" border />
+            <el-checkbox label="修饰邮箱" border />
+            <el-checkbox label="修饰地址" border />
+          </el-checkbox-group>
+        </el-form-item>
+        <el-form-item>
           <el-button type="primary" @click.native.prevent="UpdateRows">批量修改账单</el-button>
           <el-button @click="viewBatchEdit = false">取消</el-button>
         </el-form-item>
       </el-form>
     </el-dialog>
-    <!-- 选择文件 -->
-    <input v-show="false" ref="fileRef" type="file" @change="fileChange">
-    <el-button @click="uploadFile">选择文件</el-button>
     <!-- 账单页面展示 -->
     <el-table :data="tableData" stripe style="width: 100%" @selection-change="handleSelectionChange">
       <el-table-column type="selection" width="55" />
@@ -179,7 +198,45 @@
         </template>
       </el-table-column>
     </el-table>
-
+    <!-- 导入页面展示 -->
+    <el-dialog
+      title="导入账单"
+      :visible.sync="viewImport"
+      width="40%"
+      :show-close="false"
+    >
+      <el-form
+        label-width="300px"
+        label-position="right"
+      >
+        <el-row>
+          <el-col>
+            <el-form-item>
+              <el-upload
+                ref="uploadAdd"
+                style="display:inline-block;padding:20px;"
+                :limit="1"
+                class="upload-demo"
+                action="string"
+                :file-list="fileList"
+                :http-request="uploadSectionFile"
+                :auto-upload="false"
+              >
+                <el-button slot="trigger" plain>选取文件</el-button>
+                <el-button
+                  style="margin-left: 10px;"
+                  icon="el-icon-upload2"
+                  type="success"
+                  @click="submitUploadAdd"
+                >上传
+                </el-button>
+              </el-upload>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row />
+      </el-form>
+    </el-dialog>
     <el-pagination
       style="padding: 30px 0;text-align:center"
       :page-sizes="[10, 15, 20]"
@@ -191,11 +248,12 @@
     >
       />
 
-    </el-pagination></div>
+    </el-pagination>
+  </div>
 </template>
 
 <script>
-import { addProfile, deleteProfileById, selectAllProfile, selectProfileById, updateProfile, batchDeleteProfile, batchUpdateProfile } from '@/api/billing'
+import { addProfile, deleteProfileById, selectAllProfile, selectProfileById, updateProfile, batchDeleteProfile, batchUpdateProfile, exportProfile, importProfile } from '@/api/billing'
 export default {
   name: 'Billing',
   data() {
@@ -203,6 +261,10 @@ export default {
       pageSize: 10,
       pageNum: 1,
       total: 1000,
+      caState: ['AB', 'CY'],
+      usState: ['DE', 'NJ'],
+      stateList: [],
+      checkboxGroup: [],
       addData: {
         profileName: 'yyc',
         fname: 'yan',
@@ -250,9 +312,13 @@ export default {
       },
       tableData: [],
       multipleSelection: [],
+      fileName: '',
+      fileList: [],
+      file: '',
       viewAdd: false,
       viewEdit: false,
-      viewBatchEdit: false
+      viewBatchEdit: false,
+      viewImport: false
     }
   },
   created() {
@@ -296,14 +362,27 @@ export default {
         that.viewEdit = true
       })
     },
+    // 展示批量修改账单页面
+    showBatchEdit() {
+      if (this.multipleSelection.length === 0) {
+        this.$message({
+          type: 'error',
+          message: '请选择需要修改的账单!',
+          center: true
+        })
+      } else {
+        this.viewBatchEdit = true
+      }
+    },
     // 提交账单修改
     updateProfileSubmit() {
-      updateProfile(this.editData).then(res => {
+      updateProfile(this.editData, this.checkboxGroup).then(res => {
         this.$message({
           message: '修改成功！',
           type: 'success',
           center: true
         })
+        this.checkboxGroup = []
         this.viewEdit = false
         this.list()
       })
@@ -339,31 +418,39 @@ export default {
     },
     // 批量删除账单
     removeRows() {
-      this.$confirm('此操作将永久删除选中的账单信息, 是否继续?', '提示', {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }).then(() => {
-        // 确定执行 then 方法
-        var idList = []
-        // 遍历数组得到每个 id 值，设置到 idList 里面
-        for (var i = 0; i < this.multipleSelection.length; i++) {
-          var obj = this.multipleSelection[i]
-          var id = obj.id
-          idList.push(id)
-        }
-        // 调用接口
-        batchDeleteProfile(idList).then(response => {
-          // 提示
-          this.$message({
-            type: 'success',
-            message: '删除成功!',
-            center: true
-          })
-          // 刷新页面
-          this.list()
+      if (this.multipleSelection.length === 0) {
+        this.$message({
+          type: 'error',
+          message: '请选择需要删除的账单!',
+          center: true
         })
-      })
+      } else {
+        this.$confirm('此操作将永久删除选中的账单信息, 是否继续?', '提示', {
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }).then(() => {
+        // 确定执行 then 方法
+          var idList = []
+          // 遍历数组得到每个 id 值，设置到 idList 里面
+          for (var i = 0; i < this.multipleSelection.length; i++) {
+            var obj = this.multipleSelection[i]
+            var id = obj.id
+            idList.push(id)
+          }
+          // 调用接口
+          batchDeleteProfile(idList).then(response => {
+          // 提示
+            this.$message({
+              type: 'success',
+              message: '删除成功!',
+              center: true
+            })
+            // 刷新页面
+            this.list()
+          })
+        })
+      }
     },
     // 批量修改账单
     UpdateRows() {
@@ -381,7 +468,8 @@ export default {
           idList.push(id)
         }
         // 调用接口
-        batchUpdateProfile(idList, this.batchEditData).then(response => {
+        console.log(this.checkboxGroup)
+        batchUpdateProfile(idList, this.batchEditData, this.checkboxGroup).then(response => {
           // 提示
           this.$message({
             type: 'success',
@@ -389,19 +477,88 @@ export default {
             center: true
           })
           this.viewBatchEdit = false
+          this.checkboxGroup = []
           // 刷新页面
           this.list()
         })
       })
     },
-    uploadFile() {
-      console.log('这是uploadFile')
-      this.$refs.fileRef.dispatchEvent(new MouseEvent('click'))
+    // 导出账单
+    handleExport() {
+      this.$confirm('此操作将导出选中的账单信息, 是否继续?', '提示', {
+        confirmButtonText: '导出',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }).then(() => {
+        // 确定执行 then 方法
+        var idList = []
+        // 遍历数组得到每个 id 值，设置到 idList 里面
+        for (var i = 0; i < this.multipleSelection.length; i++) {
+          var obj = this.multipleSelection[i]
+          var id = obj.id
+          idList.push(id)
+        }
+        // 调用接口
+        exportProfile(idList).then(response => {
+          // 提示
+          this.$message({
+            type: 'success',
+            message: '导出成功!',
+            center: true
+          })
+          // 刷新页面
+          this.list()
+        })
+      })
     },
-    fileChange(val) {
-      console.log('这是fileChange')
-      console.log(val)
     // 上传文件
+    uploadSectionFile(param) {
+      var that = this
+      var fileObj = param.file
+      var form = new FormData()
+      form.append('file', fileObj)
+      importProfile(form).then(res => {
+        if (res.code === 200) {
+          that.$message({
+            type: 'success',
+            message: '文件上传成功'
+          })
+          that.fileList = []
+          that.viewImport = false
+          that.list()
+        } else {
+          that.$message({
+            type: 'error',
+            message: res.msg
+          })
+          that.fileList = []
+          that.viewImport = false
+        }
+        that.fileList = []
+      })
+    },
+    // 上传
+    submitUploadAdd() {
+      var that = this
+      const list = document.getElementsByClassName(
+        'el-upload-list__item is-ready'
+      )
+      if (list.length === 0) {
+        that.$message({
+          type: 'warning',
+          message: '请选择需要上传的文件！'
+        })
+        return
+      }
+      that.$refs.uploadAdd.submit()
+    },
+    // 州随国家改变而改变
+    changeCountry(e) {
+      if (e === 'US') {
+        this.stateList = this.usState
+      } else {
+        this.stateList = this.caState
+      }
     }
   }
 }
